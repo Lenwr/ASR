@@ -1,0 +1,11 @@
+<script setup>
+import { computed } from 'vue'
+import { CarFront,Wrench,ArrowUpRight } from 'lucide-vue-next'
+import AppShell from '../../components/AppShell.vue'
+import { useAuthStore } from '../../stores/auth'
+import { useOperations } from '../../lib/useOperations'
+import { dayKey,dateLabel } from '../../lib/stats'
+const auth=useAuthStore(), filters=computed(()=>({start:dayKey(new Date()),end:dayKey(new Date())}))
+const {rows,loading,error}=useOperations(filters,auth.user.uid)
+</script>
+<template><AppShell><div class="eyebrow">VOTRE ESPACE DE TRAVAIL</div><h1>Bonjour{{ auth.profile?.name ? `, ${auth.profile.name}` : '' }}.</h1><p class="subtitle">Une nouvelle opération à enregistrer ? C’est par ici.</p><div class="choices"><router-link v-if="auth.canAccess('parc')" to="/parc" class="choice"><div class="icon-tile blue"><CarFront/></div><h2>Parc automobile</h2><p>Prestations, déplacements et emplacement.</p><span>Nouvelle saisie <ArrowUpRight :size="18"/></span></router-link><router-link v-if="auth.canAccess('atelier')" to="/atelier" class="choice"><div class="icon-tile purple"><Wrench/></div><h2>Atelier</h2><p>Préparation et interventions sur les véhicules.</p><span>Nouvelle saisie <ArrowUpRight :size="18"/></span></router-link></div><p v-if="!auth.canAccess('parc') && !auth.canAccess('atelier')" class="notice">Votre rôle ou vos accès ne permettent pas de saisir des opérations. Contactez l’administrateur pour les modifier.</p><section class="panel"><div class="panel-heading"><div><h2>Mes saisies du jour</h2><p>Vos dernières opérations enregistrées</p></div><span class="badge">{{ rows.length }} saisies</span></div><p v-if="error" class="error" role="alert">{{ error }}</p><p v-else-if="loading">Chargement…</p><div v-else class="table-scroll"><table><thead><tr><th>Véhicule / activité</th><th>Prestations</th><th>Emplacement</th><th>Heure</th></tr></thead><tbody><tr v-for="r in rows" :key="r.id"><td><strong>{{ r.vehicle || 'Forfait journalier' }}</strong><small>{{ r.sector }}</small></td><td>{{ r.services.map(s=>s.name).join(', ') }}</td><td>{{ r.location || '—' }}</td><td>{{ dateLabel(r.createdAt) }}</td></tr><tr v-if="!rows.length"><td colspan="4" class="empty-cell">Aucune saisie aujourd’hui. Votre prochaine opération apparaîtra ici.</td></tr></tbody></table></div></section></AppShell></template>

@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function active() {
+      return signedIn()
+        && profile().get('active', true) == true
+        && profile().role in ['admin', 'operator'];
+    }
+    function admin() { return active() && profile().role == 'admin'; }
+    function reporting() { return admin(); }
+    function canRecord(sector) {
+      return active() && (
+        profile().role == 'admin' ||
+        (profile().role == 'operator' && profile().get(sector, false) == true)
+      );
+    }
+    function validServices(data) {
+      return data.serviceIds is list
+        && data.serviceIds.size() >= 1
+        && data.serviceIds.size() <= 16
+        && (
+          (data.sector == 'parc' && data.kind == 'unit' && data.serviceIds.hasOnly(['jumelage','navette','carburant','convoyeur'])) ||
+          (data.sector == 'parc' && data.kind == 'daily' && data.serviceIds.hasOnly(['chef-navette','inventaire','controle'])) ||
+          (data.sector == 'atelier' && data.kind == 'unit' && data.serviceIds.hasOnly(['esthetique','loueur','vo'])) ||
+          (data.sector == 'atelier' && data.kind == 'daily' && data.serviceIds.hasOnly(['entree','sortie','diagnostic','pneumatiques','batterie','controle-esthetique']))
+        );
+    }
+    function validEntry() {
+      return request.resource.data.keys().hasOnly([
+          'sector','kind','vehicle','location','serviceIds','date','operatorId','operatorName','tariffVersion','createdAt'
+        ])
+        && request.resource.data.operatorId == request.auth.uid
+        && request.resource.data.operatorName is string
+        && request.resource.data.operatorName.size() > 0
+        && request.resource.data.date is string
+        && request.resource.data.date.size() == 10
+        && request.resource.data.tariffVersion is string
+        && request.resource.data.tariffVersion == get(/databases/$(database)/documents/settings/tariff).data.version
+        && request.resource.data.createdAt == request.time
+        && validServices(request.resource.data)
+        && (
+          (request.resource.data.kind == 'daily'
+            && request.resource.data.vehicle == ''
+            && request.resource.data.location == '') ||
+          (request.resource.data.kind == 'unit'
+            && request.resource.data.vehicle is string
+            && request.resource.data.vehicle.size() >= 4
+            && request.resource.data.vehicle.size() <= 17
+            && (request.resource.data.sector != 'parc' || (
+              request.resource.data.location is string
+              && request.resource.data.location.size() > 0
+              && request.resource.data.location.size() <= 50
+            )))
+        );
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      allow create, update: if admin() && request.auth.uid != uid;
+      allow delete: if false;
+    }
+
+    match /entries/{id} {
+      allow read: if reporting() || (active() && resource.data.operatorId == request.auth.uid);
+      allow create: if canRecord(request.resource.data.sector) && validEntry();
+      allow update, delete: if false;
+    }
+
+    match /dailyLocks/{id} {
+      allow get: if active();
+      allow list: if false;
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['operationId','operatorId','date','serviceId','createdAt'])
+        && request.resource.data.operatorId == request.auth.uid
+        && request.resource.data.operationId is string
+        && request.resource.data.date is string
+        && request.resource.data.serviceId is string
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // Les opérateurs peuvent connaître l'ID de la version active, jamais ses montants.
+    match /settings/tariff {
+      allow get: if active();
+      allow list: if false;
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    // Les montants restent réservés au pilotage financier admin/responsable.
+    match /tariffVersions/{id} {
+      allow read: if reporting();
+      allow create: if admin();
+      allow update, delete: if false;
+    }
+
+    match /audit/{id} {
+      allow read: if admin();
+      allow create: if admin();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

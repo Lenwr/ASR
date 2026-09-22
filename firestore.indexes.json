@@ -1,0 +1,1 @@
+{"indexes":[{"collectionGroup":"entries","queryScope":"COLLECTION","fields":[{"fieldPath":"operatorId","order":"ASCENDING"},{"fieldPath":"date","order":"DESCENDING"}]}],"fieldOverrides":[]}

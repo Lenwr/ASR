@@ -57,8 +57,6 @@ export function createFirestoreService(db, getUid) {
   // =========================================================
 
   async function recordOperation(input) {
-    const entry = validateOperation(input, catalog)
-
     const operatorId = uid()
 
     // requestId permet d'éviter une double création
@@ -69,6 +67,11 @@ export function createFirestoreService(db, getUid) {
 
     return runTransaction(db, async transaction => {
       const profile = await readProfile(transaction)
+      const serviceIds = Array.isArray(input?.serviceIds) ? input.serviceIds : []
+      const serviceSnapshots = []
+      for (const serviceId of serviceIds) serviceSnapshots.push(await transaction.get(doc(db, 'services', serviceId)))
+      const available = serviceSnapshots.map((snapshot, index) => snapshot.exists() ? { id: serviceIds[index], ...snapshot.data() } : catalog.find(item => item.id === serviceIds[index])).filter(Boolean)
+      const entry = validateOperation(input, available)
 
       if (!canRecord(profile, entry.sector)) {
         throw new Error(
@@ -110,7 +113,7 @@ export function createFirestoreService(db, getUid) {
       // SERVICES SELECTIONNES
       // -------------------------------------------------------
 
-      const serviceIds = entry.services.map(
+      const validatedServiceIds = entry.services.map(
         service => service.id
       )
 
@@ -197,7 +200,7 @@ export function createFirestoreService(db, getUid) {
         location: entry.location,
 
         // Toutes les activités réalisées sur CE véhicule.
-        serviceIds,
+        serviceIds: validatedServiceIds,
 
         // Prestations facturées à chaque véhicule.
         unitServiceIds,
@@ -268,7 +271,7 @@ export function createFirestoreService(db, getUid) {
     })
   }
 
-  function servicesForEntry(sector, serviceIds) {
+  function servicesForEntry(sector, serviceIds, available = catalog) {
     if (
       !['parc', 'atelier'].includes(sector) ||
       !Array.isArray(serviceIds) ||
@@ -280,7 +283,7 @@ export function createFirestoreService(db, getUid) {
     }
 
     const services = serviceIds.map(id =>
-      catalog.find(
+      available.find(
         service =>
           service.id === id &&
           service.sector === sector
@@ -318,7 +321,10 @@ export function createFirestoreService(db, getUid) {
       }
 
       const before = snapshot.data()
-      const services = servicesForEntry(before.sector, input.serviceIds)
+      const serviceSnapshots = []
+      for (const serviceId of input.serviceIds || []) serviceSnapshots.push(await transaction.get(doc(db, 'services', serviceId)))
+      const available = serviceSnapshots.map((item, index) => item.exists() ? { id: input.serviceIds[index], ...item.data() } : catalog.find(service => service.id === input.serviceIds[index])).filter(Boolean)
+      const services = servicesForEntry(before.sector, input.serviceIds, available)
       const serviceIds = services.map(service => service.id)
       const unitServiceIds = services
         .filter(service => service.kind === 'unit')

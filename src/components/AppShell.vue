@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { LayoutDashboard, CarFront, Wrench, Users, SlidersHorizontal, LogOut, House, ArrowUpRight } from 'lucide-vue-next'
+import { LayoutDashboard, CarFront, Wrench, Users, SlidersHorizontal, LogOut, ArrowUpRight, ScrollText } from 'lucide-vue-next'
 import Logo from './Logo.vue'
 import { useAuthStore } from '../stores/auth'
 import { roles } from '../lib/catalog'
@@ -11,10 +11,9 @@ const menuOrder = ref([])
 const draggedMenu = ref('')
 const menuItems = computed(() => [
   reporting.value && { id: 'dashboard', to: '/admin', label: "Vue d'ensemble", icon: LayoutDashboard },
-  reporting.value && { id: 'history', to: '/history', label: 'Historique véhicules', icon: CarFront },
+  reporting.value && { id: 'history', to: '/history', label: 'Journal', icon: ScrollText },
   auth.profile?.role === 'admin' && { id: 'services', to: '/services', label: 'Prestations & tarifs', icon: SlidersHorizontal },
   auth.profile?.role === 'admin' && { id: 'users', to: '/users', label: 'Équipe & accès', icon: Users },
-  { id: 'home', to: '/home', label: 'Mon espace', icon: House },
   auth.canAccess('parc') && { id: 'parc', to: '/parc', label: 'Parc', icon: CarFront },
   auth.canAccess('atelier') && { id: 'atelier', to: '/atelier', label: 'Atelier', icon: Wrench }
 ].filter(Boolean).sort((a,b) => (menuOrder.value.indexOf(a.id) < 0 ? 999 : menuOrder.value.indexOf(a.id)) - (menuOrder.value.indexOf(b.id) < 0 ? 999 : menuOrder.value.indexOf(b.id))))

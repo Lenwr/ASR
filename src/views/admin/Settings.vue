@@ -2,15 +2,18 @@
 import { collection,onSnapshot } from 'firebase/firestore'
 
 import { db } from '../../firebase/firebase'
-import { catalog } from '../../lib/catalog'
+import { useCatalog } from '../../lib/useCatalog'
 import { call,errorText } from '../../lib/api'
 import { useAuthStore } from '../../stores/auth'
 
 const props=defineProps({users:Boolean}),auth=useAuthStore()
 const entries=ref([]),prices=ref({}),error=ref(''),success=ref(''),busy=ref(false),loading=ref(true),initialized=ref(false)
+const { services: catalogServices } = useCatalog()
 const profile=ref({uid:'',name:'',accessRole:'parc',role:'operator',parc:true,atelier:false,active:true})
-const services=computed(()=>catalog.map(s=>({...s,priceCents:Object.hasOwn(prices.value,s.id)?prices.value[s.id]:null})))
+const services=computed(()=>catalogServices.value.map(s=>({...s,priceCents:Object.hasOwn(prices.value,s.id)?prices.value[s.id]:(s.priceCents??s.initialPriceCents??null)})))
 const priceInputs=ref({})
+const serviceForm=ref({id:'',name:'',sector:'parc',kind:'unit',price:''})
+const editingService=ref(false)
 let stop=null
 
 const accessRoles = { admin: 'Administrateur', parc: 'Parc', atelier: 'Atelier' }
@@ -70,6 +73,7 @@ onMounted(async()=>{
     return
   }
   try {
+    await call('migrateCatalog',{})
     const result=await call('getPrices',{})
     initialized.value=!!result
     prices.value=result||{}
@@ -99,6 +103,17 @@ function savePrice(s){
   if(value!==null&&(!Number.isFinite(value)||value<0)){error.value='Saisissez un tarif positif ou nul.';return}
   action('updatePrice',{id:s.id,priceCents:value===null?null:Math.round(value*100)})
 }
+function editService(s){serviceForm.value={id:s.id,name:s.name,sector:s.sector,kind:s.kind,price:s.priceCents==null?'':(s.priceCents/100).toFixed(2)};editingService.value=true}
+function resetService(){serviceForm.value={id:'',name:'',sector:'parc',kind:'unit',price:''};editingService.value=false}
+async function saveService(){
+  const raw=serviceForm.value.price,priceCents=raw===''?null:Math.round(Number(raw)*100)
+  await action('saveService',{id:serviceForm.value.id,name:serviceForm.value.name,sector:serviceForm.value.sector,kind:serviceForm.value.kind,priceCents})
+  resetService()
+}
+async function deleteServiceItem(s){
+  await action('deleteService',{id:s.id})
+  if(serviceForm.value.id===s.id)resetService()
+}
 </script>
 
 <template>
@@ -113,7 +128,8 @@ function savePrice(s){
   </template>
 
   <template v-else-if="!loading">
+    <section class="panel"><div class="panel-heading"><div><h2>{{ editingService?'Modifier la prestation':'Créer une prestation' }}</h2><p>Une prestation appartient à un seul secteur.</p></div><button v-if="editingService" class="secondary" @click="resetService">Annuler</button></div><form class="service-admin-form" @submit.prevent="saveService"><label>Identifiant<input v-model="serviceForm.id" required pattern="[a-z0-9][a-z0-9-]{1,63}" :disabled="editingService" placeholder="ex. lavage-exterieur"/></label><label>Nom<input v-model="serviceForm.name" required maxlength="80" placeholder="Nom de la prestation"/></label><label>Secteur<select v-model="serviceForm.sector"><option value="parc">Parc</option><option value="atelier">Atelier</option></select></label><label>Facturation<select v-model="serviceForm.kind"><option value="unit">Unitaire</option><option value="daily">Forfait journalier</option></select></label><label>Tarif (€)<input v-model="serviceForm.price" type="number" min="0" step="0.01" placeholder="À définir"/></label><button class="primary" :disabled="busy">{{ editingService?'Enregistrer':'Créer' }}</button></form></section>
     <section v-if="!initialized" class="panel"><h2>Initialiser le catalogue</h2><p>Cette opération crée les tarifs de départ : Parc unitaire, forfaits Parc à 177,80 €, Atelier unitaire, et laisse les forfaits Atelier à définir.</p><button class="primary" :disabled="busy" @click="initialize">Initialiser les tarifs</button></section>
-    <section v-else class="panel"><div class="table-scroll"><table><thead><tr><th>Prestation / activité</th><th>Secteur</th><th>Facturation</th><th>Tarif (€)</th><th></th></tr></thead><tbody><tr v-for="s in services" :key="s.id"><td><strong>{{ s.name }}</strong></td><td><span class="badge" :class="s.sector">{{ s.sector }}</span></td><td>{{ s.kind==='daily'?'Forfait journalier / opérateur':'Prix unitaire / véhicule' }}</td><td><input class="price-input" type="number" step="0.01" min="0" max="1000000" v-model="priceInputs[s.id]" :aria-label="`Tarif ${s.name}`" placeholder="À définir"/></td><td><button class="secondary" :disabled="busy" @click="savePrice(s)">Enregistrer</button></td></tr></tbody></table></div><p class="muted"><strong>Règle forfait journalier :</strong> une activité est facturée une seule fois par opérateur et par journée, même si elle concerne plusieurs véhicules. Les forfaits Atelier peuvent être renseignés ou modifiés ici. Un tarif vide reste « à tarifer ».</p></section>
+    <section v-else class="panel"><div class="table-scroll"><table><thead><tr><th>Prestation / activité</th><th>Secteur</th><th>Facturation</th><th>Tarif (€)</th><th></th></tr></thead><tbody><tr v-for="s in services" :key="s.id"><td><strong>{{ s.name }}</strong></td><td><span class="badge" :class="s.sector">{{ s.sector }}</span></td><td>{{ s.kind==='daily'?'Forfait journalier / opérateur':'Prix unitaire' }}</td><td>{{ s.priceCents==null?'À définir':(s.priceCents/100).toFixed(2) }}</td><td><div class="row-actions"><button class="secondary" :disabled="busy" @click="editService(s)">Modifier</button><button class="secondary danger" :disabled="busy" @click="deleteServiceItem(s)">Supprimer</button></div></td></tr></tbody></table></div></section>
   </template>
 </template>

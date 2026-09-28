@@ -5,6 +5,11 @@ import { catalog } from './catalog.js'
 export async function hydrateOperations(snapshot, withPrices) {
   const entries = snapshot.docs.map(document => ({ id: document.id, ...document.data() }))
   const versions = new Map()
+  const dynamicServices = new Map()
+  await Promise.all([...new Set(entries.flatMap(entry => entry.serviceIds || []))].map(async id => {
+    const service = await getDoc(doc(db, 'services', id))
+    if (service.exists()) dynamicServices.set(id, { id, ...service.data() })
+  }))
   if (withPrices) {
     await Promise.all([...new Set(entries.map(entry => entry.tariffVersion))].map(async id => {
       const version = await getDoc(doc(db, 'tariffVersions', id))
@@ -19,11 +24,11 @@ export async function hydrateOperations(snapshot, withPrices) {
     return {
       ...entry,
       services: entry.serviceIds.map(id => {
-        const service = catalog.find(item => item.id === id)
+        const service = dynamicServices.get(id) || catalog.find(item => item.id === id)
         const priceCents =
           withPrices && alreadyCountedDailyServiceIds.has(id)
             ? 0
-            : versions.get(entry.tariffVersion)?.[id]
+            : (versions.get(entry.tariffVersion)?.[id] ?? service?.priceCents ?? service?.initialPriceCents)
 
         return {
           id,

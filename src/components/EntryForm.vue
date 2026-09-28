@@ -1,12 +1,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { Check, ArrowRight, MapPin } from 'lucide-vue-next'
-import { catalog } from '../lib/catalog'
+import { useCatalog } from '../lib/useCatalog'
 import { call, errorText } from '../lib/api'
 
 const props = defineProps({
   parc: Boolean
 })
+const { services } = useCatalog()
 
 const location = ref('')
 const locationSuggestions = ref([])
@@ -21,7 +22,7 @@ const sector = computed(() => props.parc ? 'parc' : 'atelier')
 const locationStorageKey = 'asr.locationSuggestions'
 
 const unitServices = computed(() =>
-  catalog.filter(
+  services.value.filter(
     service =>
       service.sector === sector.value &&
       service.kind === 'unit'
@@ -29,7 +30,7 @@ const unitServices = computed(() =>
 )
 
 const dailyServices = computed(() =>
-  catalog.filter(
+  services.value.filter(
     service =>
       service.sector === sector.value &&
       service.kind === 'daily'

@@ -46,11 +46,11 @@ service cloud.firestore {
         );
     }
     function validMixedServices(data) {
-      return validServiceList(data.serviceIds, allServices(data.sector), 1)
-        && validServiceList(data.unitServiceIds, unitServices(data.sector), 0)
-        && validServiceList(data.dailyServiceIds, dailyServices(data.sector), 0)
-        && validServiceList(data.newlyCountedDailyServiceIds, dailyServices(data.sector), 0)
-        && validServiceList(data.alreadyCountedDailyServiceIds, dailyServices(data.sector), 0);
+      return data.serviceIds is list && data.serviceIds.size() >= 1 && data.serviceIds.size() <= 16
+        && data.unitServiceIds is list && data.unitServiceIds.size() <= 16
+        && data.dailyServiceIds is list && data.dailyServiceIds.size() <= 16
+        && data.newlyCountedDailyServiceIds is list && data.newlyCountedDailyServiceIds.size() <= 16
+        && data.alreadyCountedDailyServiceIds is list && data.alreadyCountedDailyServiceIds.size() <= 16;
     }
     function validEntry() {
       return request.resource.data.keys().hasOnly([
@@ -148,7 +148,8 @@ service cloud.firestore {
         && request.resource.data.date is string
         && request.resource.data.sector in ['parc', 'atelier']
         && request.resource.data.serviceId is string
-        && request.resource.data.serviceId in dailyServices(request.resource.data.sector)
+        && get(/databases/$(database)/documents/services/$(request.resource.data.serviceId)).data.sector == request.resource.data.sector
+        && get(/databases/$(database)/documents/services/$(request.resource.data.serviceId)).data.kind == 'daily'
         && request.resource.data.createdAt == request.time;
       allow update, delete: if admin();
     }

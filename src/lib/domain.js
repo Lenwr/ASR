@@ -48,13 +48,8 @@ export function validateOperation(data, catalog) {
       ? data.location.trim().toUpperCase()
       : ''
 
-  if (
-    vehicle.length < 4 ||
-    vehicle.length > 17
-  ) {
-    throw new Error(
-      'Indiquez une plaque ou un VIN valide (4 à 17 caractères).'
-    )
+  if (vehicle.length > 17) {
+    throw new Error('L’identifiant véhicule ne peut pas dépasser 17 caractères.')
   }
 
   if (

@@ -268,6 +268,249 @@ export function createFirestoreService(db, getUid) {
     })
   }
 
+  function servicesForEntry(sector, serviceIds) {
+    if (
+      !['parc', 'atelier'].includes(sector) ||
+      !Array.isArray(serviceIds) ||
+      serviceIds.length < 1 ||
+      serviceIds.length > 16 ||
+      new Set(serviceIds).size !== serviceIds.length
+    ) {
+      throw new Error('Sélection de prestations invalide.')
+    }
+
+    const services = serviceIds.map(id =>
+      catalog.find(
+        service =>
+          service.id === id &&
+          service.sector === sector
+      )
+    )
+
+    if (services.some(service => !service)) {
+      throw new Error(
+        'Une prestation sélectionnée est incompatible avec ce secteur.'
+      )
+    }
+
+    return services
+  }
+
+  async function updateOperation(input) {
+    const id =
+      typeof input?.id === 'string'
+        ? input.id
+        : ''
+
+    if (!id || id.includes('/')) {
+      throw new Error('Saisie introuvable.')
+    }
+
+    const ref = doc(db, 'entries', id)
+    const audit = doc(collection(db, 'audit'))
+
+    return runTransaction(db, async transaction => {
+      const admin = await readProfile(transaction, true)
+      const snapshot = await transaction.get(ref)
+
+      if (!snapshot.exists()) {
+        throw new Error('Cette saisie n’existe plus.')
+      }
+
+      const before = snapshot.data()
+      const services = servicesForEntry(before.sector, input.serviceIds)
+      const serviceIds = services.map(service => service.id)
+      const unitServiceIds = services
+        .filter(service => service.kind === 'unit')
+        .map(service => service.id)
+      const dailyServiceIds = services
+        .filter(service => service.kind === 'daily')
+        .map(service => service.id)
+
+      const location =
+        before.sector === 'parc'
+          ? String(input.location || '').trim().toUpperCase()
+          : ''
+
+      if (
+        before.sector === 'parc' &&
+        (!location || location.length > 50)
+      ) {
+        throw new Error(
+          'L’emplacement Parc est obligatoire (50 caractères maximum).'
+        )
+      }
+
+      const previousNew = new Set(before.newlyCountedDailyServiceIds || [])
+      const previousAlready = new Set(before.alreadyCountedDailyServiceIds || [])
+      const nextNew = []
+      const nextAlready = []
+      const lockChecks = []
+      const removedLockChecks = []
+
+      for (const serviceId of dailyServiceIds) {
+        const lockRef = doc(
+          db,
+          'dailyLocks',
+          `${before.operatorId}_${before.date}_${serviceId}`
+        )
+        const lockSnapshot = await transaction.get(lockRef)
+
+        lockChecks.push({
+          serviceId,
+          ref: lockRef,
+          snapshot: lockSnapshot
+        })
+
+        if (previousNew.has(serviceId)) {
+          nextNew.push(serviceId)
+        } else if (
+          previousAlready.has(serviceId) ||
+          lockSnapshot.exists()
+        ) {
+          nextAlready.push(serviceId)
+        } else {
+          nextNew.push(serviceId)
+        }
+      }
+
+      for (const serviceId of previousNew) {
+        if (dailyServiceIds.includes(serviceId)) continue
+
+        const lockRef = doc(
+          db,
+          'dailyLocks',
+          `${before.operatorId}_${before.date}_${serviceId}`
+        )
+        const lockSnapshot = await transaction.get(lockRef)
+
+        removedLockChecks.push({
+          ref: lockRef,
+          snapshot: lockSnapshot
+        })
+      }
+
+      for (const lock of lockChecks) {
+        if (!nextNew.includes(lock.serviceId)) continue
+        if (lock.snapshot.exists()) continue
+
+        transaction.set(lock.ref, {
+          operationId: id,
+          operatorId: before.operatorId,
+          date: before.date,
+          serviceId: lock.serviceId,
+          sector: before.sector,
+          createdAt: serverTimestamp()
+        })
+      }
+
+      for (const lock of removedLockChecks) {
+        if (
+          lock.snapshot.exists() &&
+          lock.snapshot.data().operationId === id
+        ) {
+          transaction.delete(lock.ref)
+        }
+      }
+
+      const after = {
+        ...before,
+        location,
+        serviceIds,
+        unitServiceIds,
+        dailyServiceIds,
+        newlyCountedDailyServiceIds: nextNew,
+        alreadyCountedDailyServiceIds: nextAlready,
+        updatedBy: admin.uid,
+        updatedAt: serverTimestamp(),
+        auditId: audit.id
+      }
+
+      transaction.update(ref, {
+        location: after.location,
+        serviceIds: after.serviceIds,
+        unitServiceIds: after.unitServiceIds,
+        dailyServiceIds: after.dailyServiceIds,
+        newlyCountedDailyServiceIds: after.newlyCountedDailyServiceIds,
+        alreadyCountedDailyServiceIds: after.alreadyCountedDailyServiceIds,
+        updatedBy: after.updatedBy,
+        updatedAt: after.updatedAt,
+        auditId: after.auditId
+      })
+
+      transaction.set(audit, {
+        actor: admin.uid,
+        action: 'entry.update',
+        target: id,
+        before,
+        after,
+        createdAt: serverTimestamp()
+      })
+
+      return { ok: true }
+    })
+  }
+
+  async function deleteOperation({ id } = {}) {
+    if (
+      typeof id !== 'string' ||
+      !id ||
+      id.includes('/')
+    ) {
+      throw new Error('Saisie introuvable.')
+    }
+
+    const ref = doc(db, 'entries', id)
+    const audit = doc(collection(db, 'audit'))
+
+    return runTransaction(db, async transaction => {
+      const admin = await readProfile(transaction, true)
+      const snapshot = await transaction.get(ref)
+
+      if (!snapshot.exists()) {
+        return { ok: true }
+      }
+
+      const before = snapshot.data()
+      const lockChecks = []
+
+      for (const serviceId of before.newlyCountedDailyServiceIds || []) {
+        const lockRef = doc(
+          db,
+          'dailyLocks',
+          `${before.operatorId}_${before.date}_${serviceId}`
+        )
+        const lockSnapshot = await transaction.get(lockRef)
+
+        lockChecks.push({
+          ref: lockRef,
+          snapshot: lockSnapshot
+        })
+      }
+
+      for (const lock of lockChecks) {
+        if (
+          lock.snapshot.exists() &&
+          lock.snapshot.data().operationId === id
+        ) {
+          transaction.delete(lock.ref)
+        }
+      }
+
+      transaction.delete(ref)
+      transaction.set(audit, {
+        actor: admin.uid,
+        action: 'entry.delete',
+        target: id,
+        before,
+        after: null,
+        createdAt: serverTimestamp()
+      })
+
+      return { ok: true }
+    })
+  }
+
   // =========================================================
   // TARIFS
   // =========================================================
@@ -327,8 +570,12 @@ export function createFirestoreService(db, getUid) {
             )
           : null
 
+        const baseRates = previousVersion?.data()?.rates ?? null
+        const currentRates = baseRates
+          ? { ...initialRates, ...baseRates }
+          : null
         const rates = transform(
-          previousVersion?.data()?.rates ?? null
+          currentRates
         )
 
         if (!rates) {
@@ -416,6 +663,58 @@ export function createFirestoreService(db, getUid) {
         ...current,
         [id]: priceCents
       }
+    })
+  }
+
+  function normalizeService(input) {
+    const id = typeof input?.id === 'string' ? input.id.trim().toLowerCase() : ''
+    const name = typeof input?.name === 'string' ? input.name.trim() : ''
+    const sector = input?.sector
+    const kind = input?.kind
+    const priceCents = input?.priceCents ?? null
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id) || !name || name.length > 80 || !['parc', 'atelier'].includes(sector) || !['unit', 'daily'].includes(kind) || !validPrice(priceCents)) {
+      throw new Error('Prestation invalide.')
+    }
+    return { id, name, sector, kind, priceCents }
+  }
+
+  async function migrateCatalog() {
+    return runTransaction(db, async transaction => {
+      const admin = await readProfile(transaction, true)
+      const snapshots = []
+      for (const service of catalog) snapshots.push(await transaction.get(doc(db, 'services', service.id)))
+      catalog.forEach((service, index) => {
+        if (snapshots[index].exists()) return
+        transaction.set(doc(db, 'services', service.id), {
+          name: service.name, sector: service.sector, kind: service.kind,
+          priceCents: service.initialPriceCents, createdAt: serverTimestamp(), createdBy: admin.uid
+        })
+      })
+      return { ok: true, count: catalog.length }
+    })
+  }
+
+  async function saveService(input) {
+    const service = normalizeService(input)
+    return runTransaction(db, async transaction => {
+      const admin = await readProfile(transaction, true)
+      const ref = doc(db, 'services', service.id)
+      const previous = await transaction.get(ref)
+      transaction.set(ref, {
+        name: service.name, sector: service.sector, kind: service.kind, priceCents: service.priceCents,
+        updatedAt: serverTimestamp(), updatedBy: admin.uid,
+        ...(!previous.exists() ? { createdAt: serverTimestamp(), createdBy: admin.uid } : {})
+      }, { merge: true })
+      return { ok: true, id: service.id }
+    })
+  }
+
+  async function deleteService({ id } = {}) {
+    if (typeof id !== 'string' || !id || id.includes('/')) throw new Error('Prestation invalide.')
+    return runTransaction(db, async transaction => {
+      await readProfile(transaction, true)
+      transaction.delete(doc(db, 'services', id))
+      return { ok: true }
     })
   }
 
@@ -537,9 +836,14 @@ export function createFirestoreService(db, getUid) {
 
   return {
     recordOperation,
+    updateOperation,
+    deleteOperation,
     getPrices,
     initializePrices,
     updatePrice,
+    migrateCatalog,
+    saveService,
+    deleteService,
     updateUser
   }
 }

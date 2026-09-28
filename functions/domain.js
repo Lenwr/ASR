@@ -6,7 +6,7 @@ export function validateOperation(data,catalog) {
   if(services.some(s=>!s)) throw new Error('Prestation incompatible avec le secteur ou le type de saisie.')
   const vehicle=typeof data.vehicle==='string'?data.vehicle.toUpperCase().replace(/[^A-Z0-9]/g,''):''
   const location=typeof data.location==='string'?data.location.trim().toUpperCase():''
-  if (data.kind==='unit' && (vehicle.length<4 || vehicle.length>17)) throw new Error('Indiquez une plaque ou un VIN valide (4 à 17 caractères).')
+  if (vehicle.length > 17) throw new Error('L’identifiant véhicule ne peut pas dépasser 17 caractères.')
   if(data.kind==='unit' && data.sector==='parc' && (!location || location.length>50)) throw new Error('L’emplacement Parc est obligatoire (50 caractères maximum).')
   return {sector:data.sector,kind:data.kind,vehicle:data.kind==='unit'?vehicle:'',location:data.kind==='unit'&&data.sector==='parc'?location:'',services}
 }

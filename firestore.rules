@@ -16,20 +16,47 @@ service cloud.firestore {
         (profile().role == 'operator' && profile().get(sector, false) == true)
       );
     }
-    function validServices(data) {
-      return data.serviceIds is list
-        && data.serviceIds.size() >= 1
-        && data.serviceIds.size() <= 16
-        && (
-          (data.sector == 'parc' && data.kind == 'unit' && data.serviceIds.hasOnly(['jumelage','navette','carburant','convoyeur'])) ||
-          (data.sector == 'parc' && data.kind == 'daily' && data.serviceIds.hasOnly(['chef-navette','inventaire','controle'])) ||
-          (data.sector == 'atelier' && data.kind == 'unit' && data.serviceIds.hasOnly(['esthetique','loueur','vo'])) ||
-          (data.sector == 'atelier' && data.kind == 'daily' && data.serviceIds.hasOnly(['entree','sortie','diagnostic','pneumatiques','batterie','controle-esthetique']))
+    function unitServices(sector) {
+      return sector == 'parc'
+        ? ['jumelage','navette','carburant','convoyeur']
+        : ['esthetique','loueur','vo'];
+    }
+    function dailyServices(sector) {
+      return sector == 'parc'
+        ? ['chef-navette','inventaire','controle']
+        : ['entree','sortie','diagnostic','pneumatiques','batterie','controle-esthetique'];
+    }
+    function allServices(sector) {
+      return sector == 'parc'
+        ? ['jumelage','navette','carburant','convoyeur','chef-navette','inventaire','controle']
+        : ['esthetique','loueur','vo','entree','sortie','diagnostic','pneumatiques','batterie','controle-esthetique'];
+    }
+    function validServiceList(ids, allowed, minimum) {
+      return ids is list
+        && ids.size() >= minimum
+        && ids.size() <= 16
+        && ids.hasOnly(allowed);
+    }
+    function validLegacyServices(data) {
+      return data.kind in ['unit', 'daily']
+        && validServiceList(
+          data.serviceIds,
+          data.kind == 'unit' ? unitServices(data.sector) : dailyServices(data.sector),
+          1
         );
+    }
+    function validMixedServices(data) {
+      return validServiceList(data.serviceIds, allServices(data.sector), 1)
+        && validServiceList(data.unitServiceIds, unitServices(data.sector), 0)
+        && validServiceList(data.dailyServiceIds, dailyServices(data.sector), 0)
+        && validServiceList(data.newlyCountedDailyServiceIds, dailyServices(data.sector), 0)
+        && validServiceList(data.alreadyCountedDailyServiceIds, dailyServices(data.sector), 0);
     }
     function validEntry() {
       return request.resource.data.keys().hasOnly([
-          'sector','kind','vehicle','location','serviceIds','date','operatorId','operatorName','tariffVersion','createdAt'
+          'sector','kind','vehicle','location','serviceIds','unitServiceIds','dailyServiceIds',
+          'newlyCountedDailyServiceIds','alreadyCountedDailyServiceIds',
+          'date','operatorId','operatorName','tariffVersion','createdAt'
         ])
         && request.resource.data.operatorId == request.auth.uid
         && request.resource.data.operatorName is string
@@ -39,12 +66,13 @@ service cloud.firestore {
         && request.resource.data.tariffVersion is string
         && request.resource.data.tariffVersion == get(/databases/$(database)/documents/settings/tariff).data.version
         && request.resource.data.createdAt == request.time
-        && validServices(request.resource.data)
+        && request.resource.data.sector in ['parc', 'atelier']
         && (
-          (request.resource.data.kind == 'daily'
-            && request.resource.data.vehicle == ''
-            && request.resource.data.location == '') ||
-          (request.resource.data.kind == 'unit'
+          (
+            request.resource.data.keys().hasAll([
+              'unitServiceIds','dailyServiceIds','newlyCountedDailyServiceIds','alreadyCountedDailyServiceIds'
+            ])
+            && validMixedServices(request.resource.data)
             && request.resource.data.vehicle is string
             && request.resource.data.vehicle.size() >= 4
             && request.resource.data.vehicle.size() <= 17
@@ -52,7 +80,26 @@ service cloud.firestore {
               request.resource.data.location is string
               && request.resource.data.location.size() > 0
               && request.resource.data.location.size() <= 50
-            )))
+            ))
+          ) ||
+          (
+            request.resource.data.keys().hasAll(['kind'])
+            && validLegacyServices(request.resource.data)
+            && (
+              (request.resource.data.kind == 'daily'
+                && request.resource.data.vehicle == ''
+                && request.resource.data.location == '') ||
+              (request.resource.data.kind == 'unit'
+                && request.resource.data.vehicle is string
+                && request.resource.data.vehicle.size() >= 4
+                && request.resource.data.vehicle.size() <= 17
+                && (request.resource.data.sector != 'parc' || (
+                  request.resource.data.location is string
+                  && request.resource.data.location.size() > 0
+                  && request.resource.data.location.size() <= 50
+                )))
+            )
+          )
         );
     }
 
@@ -63,23 +110,47 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Catalogue dynamique : visible par les comptes actifs, administrable
+    // uniquement par un administrateur. Une prestation appartient à un seul secteur.
+    match /services/{serviceId} {
+      allow read: if active();
+      allow create, update: if admin()
+        && request.resource.data.keys().hasOnly([
+          'name','sector','kind','priceCents','createdAt','createdBy','updatedAt','updatedBy'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.sector in ['parc', 'atelier']
+        && request.resource.data.kind in ['unit', 'daily']
+        && (request.resource.data.priceCents == null || (
+          request.resource.data.priceCents is int
+          && request.resource.data.priceCents >= 0
+          && request.resource.data.priceCents <= 100000000
+        ));
+      allow delete: if admin();
+    }
+
     match /entries/{id} {
-      allow read: if reporting() || (active() && resource.data.operatorId == request.auth.uid);
+      allow get: if reporting() || (active() && id.matches(request.auth.uid + '_.*'));
+      allow list: if reporting() || (active() && resource.data.operatorId == request.auth.uid);
       allow create: if canRecord(request.resource.data.sector) && validEntry();
-      allow update, delete: if false;
+      allow update, delete: if admin();
     }
 
     match /dailyLocks/{id} {
       allow get: if active();
       allow list: if false;
       allow create: if active()
-        && request.resource.data.keys().hasOnly(['operationId','operatorId','date','serviceId','createdAt'])
+        && request.resource.data.keys().hasOnly(['operationId','operatorId','date','serviceId','sector','createdAt'])
         && request.resource.data.operatorId == request.auth.uid
         && request.resource.data.operationId is string
         && request.resource.data.date is string
+        && request.resource.data.sector in ['parc', 'atelier']
         && request.resource.data.serviceId is string
+        && request.resource.data.serviceId in dailyServices(request.resource.data.sector)
         && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow update, delete: if admin();
     }
 
     // Les opérateurs peuvent connaître l'ID de la version active, jamais ses montants.

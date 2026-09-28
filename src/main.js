@@ -6,6 +6,7 @@ import router from './router'
 
 // CSS global de l'application
 import './style.css'
+import 'vue3-toastify/dist/index.css'
 
 const app = createApp(App)
 

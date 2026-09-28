@@ -12,11 +12,26 @@ export async function hydrateOperations(snapshot, withPrices) {
       versions.set(id, version.data().rates)
     }))
   }
-  return entries.map(entry => ({
-    ...entry,
-    services: entry.serviceIds.map(id => ({
-      id, name: catalog.find(service => service.id === id)?.name || id,
-      ...(withPrices ? { priceCents: versions.get(entry.tariffVersion)[id] } : {}),
-    })),
-  })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+  return entries.map(entry => {
+    const alreadyCountedDailyServiceIds =
+      new Set(entry.alreadyCountedDailyServiceIds || [])
+
+    return {
+      ...entry,
+      services: entry.serviceIds.map(id => {
+        const service = catalog.find(item => item.id === id)
+        const priceCents =
+          withPrices && alreadyCountedDailyServiceIds.has(id)
+            ? 0
+            : versions.get(entry.tariffVersion)?.[id]
+
+        return {
+          id,
+          name: service?.name || id,
+          kind: service?.kind || entry.kind,
+          ...(withPrices ? { priceCents } : {}),
+        }
+      }),
+    }
+  }).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
 }

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Check, ArrowRight, MapPin } from 'lucide-vue-next'
 import { catalog } from '../lib/catalog'
 import { call, errorText } from '../lib/api'
@@ -8,17 +8,17 @@ const props = defineProps({
   parc: Boolean
 })
 
-const vehicle = ref('')
 const location = ref('')
+const locationSuggestions = ref([])
 const selected = ref([])
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
-const vehicleInput = ref(null)
 
 let requestId = null
 
 const sector = computed(() => props.parc ? 'parc' : 'atelier')
+const locationStorageKey = 'asr.locationSuggestions'
 
 const unitServices = computed(() =>
   catalog.filter(
@@ -35,6 +35,38 @@ const dailyServices = computed(() =>
       service.kind === 'daily'
   )
 )
+
+
+onMounted(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(locationStorageKey) || '[]')
+    locationSuggestions.value = Array.isArray(saved)
+      ? saved.filter(item => typeof item === 'string').slice(0, 20)
+      : []
+  } catch {
+    locationSuggestions.value = []
+  }
+})
+
+function normalizeLocation(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+}
+
+function rememberLocation(value) {
+  const normalized = normalizeLocation(value)
+  if (!normalized) return
+
+  const next = [
+    normalized,
+    ...locationSuggestions.value.filter(item => item !== normalized)
+  ].slice(0, 20)
+
+  locationSuggestions.value = next
+  localStorage.setItem(locationStorageKey, JSON.stringify(next))
+}
 
 async function submit() {
   if (busy.value) return
@@ -54,21 +86,21 @@ async function submit() {
     await call('recordOperation', {
       requestId,
       sector: sector.value,
-      vehicle: vehicle.value,
-      location: location.value,
+      vehicle: '',
+      location: normalizeLocation(location.value),
       serviceIds: selected.value
     })
+
+    if (props.parc) {
+      rememberLocation(location.value)
+    }
 
     success.value =
       'Saisie enregistrée. Vous pouvez saisir le véhicule suivant.'
 
-    vehicle.value = ''
     location.value = ''
     selected.value = []
     requestId = null
-
-    await nextTick()
-    vehicleInput.value?.focus()
 
   } catch (e) {
     error.value = errorText(e)
@@ -86,26 +118,9 @@ async function submit() {
       @input="requestId = null"
     >
 
-      <!-- VEHICULE -->
-      <label for="vehicle">
-        01
-        <span>Plaque d’immatriculation ou VIN</span>
-      </label>
-
-      <input
-        id="vehicle"
-        ref="vehicleInput"
-        v-model="vehicle"
-        placeholder="Ex. AB-123-CD"
-        maxlength="30"
-        required
-        autocomplete="off"
-        class="vehicle-input"
-      />
-
       <!-- PRESTATIONS UNITAIRES -->
       <label>
-        02
+        01
         <span>Prestations effectuées</span>
       </label>
 
@@ -139,7 +154,7 @@ async function submit() {
 
       <!-- FORFAITS -->
       <label class="daily-title">
-        03
+        02
         <span>Activités au forfait journalier</span>
       </label>
 
@@ -175,7 +190,7 @@ async function submit() {
       <template v-if="parc">
 
         <label for="location">
-          04
+          03
           <span>Emplacement de dépôt</span>
         </label>
 
@@ -186,12 +201,21 @@ async function submit() {
           <input
             id="location"
             v-model="location"
-            placeholder="Ex. B-124 ou ZONE C-42"
+            list="location-suggestions"
+            placeholder="Ex. B-124, ZONE C-42, RANG 3"
             maxlength="50"
             required
           />
 
         </div>
+
+        <datalist id="location-suggestions">
+          <option
+            v-for="item in locationSuggestions"
+            :key="item"
+            :value="item"
+          />
+        </datalist>
 
       </template>
 

@@ -75,3 +75,48 @@ export const getPrices=onCall(options,async request=>db.runTransaction(async tra
   const docs=await Promise.all(catalog.map(s=>transaction.get(db.doc(`prices/${s.id}`))))
   return Object.fromEntries(catalog.map((s,i)=>[s.id,docs[i].exists?docs[i].data().priceCents:s.priceCents]))
 }))
+
+function servicePayload(data) {
+  const name=typeof data?.name==='string'?data.name.trim():''
+  const sector=data?.sector,kind=data?.kind,priceCents=data?.priceCents??null
+  if(!name||name.length>80||!['parc','atelier'].includes(sector)||!['unit','daily'].includes(kind)||!validPrice(priceCents))throw new HttpsError('invalid-argument','Prestation invalide.')
+  return {name,sector,kind,priceCents}
+}
+
+export const migrateCatalog=onCall(options,async request=>{
+  if(!request.auth)throw new HttpsError('unauthenticated','Connexion requise.')
+  return db.runTransaction(async transaction=>{
+    await profileIn(transaction,request,true)
+    const refs=catalog.map(service=>db.doc(`services/${service.id}`))
+    const existing=await Promise.all(refs.map(ref=>transaction.get(ref)))
+    catalog.forEach((service,index)=>{if(!existing[index].exists)transaction.create(refs[index],{name:service.name,sector:service.sector,kind:service.kind,priceCents:service.priceCents,createdAt:FieldValue.serverTimestamp(),createdBy:request.auth.uid})})
+    audit(transaction,request.auth.uid,'catalog.migrate','services',null,{count:catalog.length})
+    return {ok:true,count:catalog.length}
+  })
+})
+
+export const saveService=onCall(options,async request=>{
+  if(!request.auth)throw new HttpsError('unauthenticated','Connexion requise.')
+  const id=typeof request.data?.id==='string'?request.data.id.trim():''
+  if(!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id))throw new HttpsError('invalid-argument','Identifiant de prestation invalide.')
+  const payload=servicePayload(request.data)
+  return db.runTransaction(async transaction=>{
+    await profileIn(transaction,request,true)
+    const ref=db.doc(`services/${id}`),previous=await transaction.get(ref)
+    const next={...payload,updatedAt:FieldValue.serverTimestamp(),updatedBy:request.auth.uid,...(!previous.exists?{createdAt:FieldValue.serverTimestamp(),createdBy:request.auth.uid}:{})}
+    transaction.set(ref,next,{merge:true});audit(transaction,request.auth.uid,previous.exists?'service.update':'service.create',id,previous.data(),next)
+    return {ok:true,id}
+  })
+})
+
+export const deleteService=onCall(options,async request=>{
+  if(!request.auth)throw new HttpsError('unauthenticated','Connexion requise.')
+  const id=typeof request.data?.id==='string'?request.data.id:''
+  if(!id||id.includes('/'))throw new HttpsError('invalid-argument','Prestation invalide.')
+  return db.runTransaction(async transaction=>{
+    await profileIn(transaction,request,true)
+    const ref=db.doc(`services/${id}`),previous=await transaction.get(ref)
+    if(previous.exists){transaction.delete(ref);audit(transaction,request.auth.uid,'service.delete',id,previous.data(),null)}
+    return {ok:true}
+  })
+})

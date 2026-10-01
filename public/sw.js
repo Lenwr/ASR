@@ -1,5 +1,5 @@
 const CACHE_NAME = 'asr-shell-v1'
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/pwa-icon.svg']
+const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/pwa-logo.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)))

@@ -11,7 +11,7 @@ export async function hydrateOperations(snapshot, withPrices) {
     if (service.exists()) dynamicServices.set(id, { id, ...service.data() })
   }))
   if (withPrices) {
-    await Promise.all([...new Set(entries.map(entry => entry.tariffVersion))].map(async id => {
+    await Promise.all([...new Set(entries.map(entry => entry.tariffVersion).filter(id => id && id !== 'manual'))].map(async id => {
       const version = await getDoc(doc(db, 'tariffVersions', id))
       if (!version.exists()) throw new Error('Un tarif historique est introuvable. Les montants ne peuvent pas être affichés.')
       versions.set(id, version.data().rates)
@@ -25,7 +25,7 @@ export async function hydrateOperations(snapshot, withPrices) {
       ...entry,
       services: entry.serviceIds.map(id => {
         const service = dynamicServices.get(id) || catalog.find(item => item.id === id)
-        const priceCents =
+          const priceCents =
           withPrices && alreadyCountedDailyServiceIds.has(id)
             ? 0
             : (versions.get(entry.tariffVersion)?.[id] ?? service?.priceCents ?? service?.initialPriceCents)

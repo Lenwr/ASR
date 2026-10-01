@@ -6,8 +6,8 @@ import { auth, db } from '../firebase/firebase'
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null), profile = ref(null), loading = ref(true)
   let ready, stopProfile
-  const valid = p => p && p.active !== false && ['operator','admin'].includes(p.role)
-  const canAccess = sector => profile.value?.role === 'admin' || (profile.value?.role === 'operator' && profile.value?.[sector] === true)
+  const valid = p => p && p.active !== false && ['admin','superAdmin'].includes(p.role)
+  const canAccess = sector => ['admin','superAdmin'].includes(profile.value?.role)
   async function logout() { stopProfile?.(); profile.value=null; user.value=null; await signOut(auth) }
   function initAuth() {
     if (ready) return ready

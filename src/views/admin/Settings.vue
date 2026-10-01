@@ -9,19 +9,17 @@ import { useAuthStore } from '../../stores/auth'
 const props=defineProps({users:Boolean}),auth=useAuthStore()
 const entries=ref([]),prices=ref({}),error=ref(''),success=ref(''),busy=ref(false),loading=ref(true),initialized=ref(false)
 const { services: catalogServices } = useCatalog()
-const profile=ref({uid:'',name:'',accessRole:'parc',role:'operator',parc:true,atelier:false,active:true})
+const profile=ref({uid:'',name:'',accessRole:'admin',role:'admin',parc:true,atelier:true,active:true})
 const services=computed(()=>catalogServices.value.map(s=>({...s,priceCents:Object.hasOwn(prices.value,s.id)?prices.value[s.id]:(s.priceCents??s.initialPriceCents??null)})))
 const priceInputs=ref({})
 const serviceForm=ref({id:'',name:'',sector:'parc',kind:'unit',price:''})
 const editingService=ref(false)
 let stop=null
 
-const accessRoles = { admin: 'Administrateur', parc: 'Parc', atelier: 'Atelier' }
+const accessRoles = { admin: 'Administrateur', superAdmin: 'Super administrateur' }
 
 function roleKey(user) {
-  if (user.role === 'admin') return 'admin'
-  if (user.atelier && !user.parc) return 'atelier'
-  return 'parc'
+  return user.role === 'superAdmin' ? 'superAdmin' : 'admin'
 }
 
 function accessLabel(user) {
@@ -30,16 +28,16 @@ function accessLabel(user) {
 }
 
 function applyAccessRole() {
-  if (profile.value.accessRole === 'admin') {
-    profile.value.role = 'admin'
+  if (['admin','superAdmin'].includes(profile.value.accessRole)) {
+    profile.value.role = profile.value.accessRole
     profile.value.parc = true
     profile.value.atelier = true
     return
   }
 
-  profile.value.role = 'operator'
-  profile.value.parc = profile.value.accessRole === 'parc'
-  profile.value.atelier = profile.value.accessRole === 'atelier'
+  profile.value.role = 'admin'
+  profile.value.parc = true
+  profile.value.atelier = true
 }
 
 function payloadProfile() {

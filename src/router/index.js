@@ -6,10 +6,10 @@ const router=createRouter({history:createWebHistory(),routes:[
   {path:'/home',component:()=>import('../views/operator/Home.vue'),meta:{requiresAuth:true}},
   {path:'/parc',component:()=>import('../views/operator/Parc.vue'),meta:{requiresAuth:true,access:'parc'}},
   {path:'/atelier',component:()=>import('../views/operator/Atelier.vue'),meta:{requiresAuth:true,access:'atelier'}},
-  {path:'/admin',component:()=>import('../views/admin/Dashboard.vue'),meta:{requiresAuth:true,roles:['admin']}},
-  {path:'/history',component:()=>import('../views/admin/History.vue'),meta:{requiresAuth:true,roles:['admin']}},
-  {path:'/services',component:()=>import('../views/admin/Settings.vue'),meta:{requiresAuth:true,roles:['admin']}},
-  {path:'/users',component:()=>import('../views/admin/Settings.vue'),props:{users:true},meta:{requiresAuth:true,roles:['admin']}},
+  {path:'/admin',component:()=>import('../views/admin/Dashboard.vue'),meta:{requiresAuth:true,roles:['admin','superAdmin']}},
+  {path:'/history',component:()=>import('../views/admin/History.vue'),meta:{requiresAuth:true,roles:['admin','superAdmin']}},
+  {path:'/services',component:()=>import('../views/admin/Settings.vue'),meta:{requiresAuth:true,roles:['superAdmin']}},
+  {path:'/users',component:()=>import('../views/admin/Settings.vue'),props:{users:true},meta:{requiresAuth:true,roles:['admin','superAdmin']}},
   {path:'/:pathMatch(.*)*',redirect:'/'}
 ]})
 let observing=false
@@ -20,7 +20,7 @@ router.beforeEach(async to=>{
   const store=useAuthStore();await store.initAuth()
   if(!observing){observing=true;watch(()=>store.profile,()=>{if(router.currentRoute.value.meta.requiresAuth){if(!store.profile)router.replace('/');else if(!allowed(router.currentRoute.value,store))router.replace('/home')}})}
   if(to.meta.requiresAuth && (!store.user||!store.profile))return '/'
-  if(to.path==='/'&&store.profile)return store.profile.role==='admin'?'/admin':'/home'
+  if(to.path==='/'&&store.profile)return '/admin'
   if(!allowed(to,store))return '/home'
 })
 export default router

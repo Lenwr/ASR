@@ -10,7 +10,7 @@ const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Paris',year:'n
 async function profileIn(transaction,request,admin=false) {
   if(!request.auth)throw new HttpsError('unauthenticated','Connexion requise.')
   const snap=await transaction.get(db.doc(`users/${request.auth.uid}`)),profile=snap.data()
-  if(!profile || profile.active===false || !['operator','manager','admin'].includes(profile.role) || (admin && profile.role!=='admin'))throw new HttpsError('permission-denied','Accès non autorisé.')
+  if(!profile || profile.active===false || !['admin','superAdmin'].includes(profile.role) || (admin && !['admin','superAdmin'].includes(profile.role)))throw new HttpsError('permission-denied','Accès non autorisé.')
   return profile
 }
 function audit(transaction,uid,action,target,before,after) {

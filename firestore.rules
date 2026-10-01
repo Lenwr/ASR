@@ -6,19 +6,18 @@ service cloud.firestore {
     function active() {
       return signedIn()
         && profile().get('active', true) == true
-        && profile().role in ['admin', 'operator'];
+        && profile().role in ['admin', 'superAdmin'];
     }
-    function admin() { return active() && profile().role == 'admin'; }
+    function admin() { return active() && profile().role in ['admin','superAdmin']; }
     function reporting() { return admin(); }
     function canRecord(sector) {
       return active() && (
-        profile().role == 'admin' ||
-        (profile().role == 'operator' && profile().get(sector, false) == true)
+        profile().role in ['admin','superAdmin']
       );
     }
     function unitServices(sector) {
       return sector == 'parc'
-        ? ['jumelage','navette','carburant','convoyeur']
+        ? ['jumelage','navette']
         : ['esthetique','loueur','vo'];
     }
     function dailyServices(sector) {
@@ -28,7 +27,7 @@ service cloud.firestore {
     }
     function allServices(sector) {
       return sector == 'parc'
-        ? ['jumelage','navette','carburant','convoyeur','chef-navette','inventaire','controle']
+        ? ['jumelage','navette','chef-navette','inventaire','controle']
         : ['esthetique','loueur','vo','entree','sortie','diagnostic','pneumatiques','batterie','controle-esthetique'];
     }
     function validServiceList(ids, allowed, minimum) {
@@ -54,7 +53,7 @@ service cloud.firestore {
     }
     function validEntry() {
       return request.resource.data.keys().hasOnly([
-          'sector','kind','vehicle','location','serviceIds','unitServiceIds','dailyServiceIds',
+          'sector','kind','vehicle','location','parcIdentifier','color','revenue','price','overtime','percent25','percent50','hours','hours25','hours50','prorata','serviceIds','unitServiceIds','dailyServiceIds',
           'newlyCountedDailyServiceIds','alreadyCountedDailyServiceIds',
           'date','operatorId','operatorName','tariffVersion','createdAt'
         ])
@@ -64,7 +63,8 @@ service cloud.firestore {
         && request.resource.data.date is string
         && request.resource.data.date.size() == 10
         && request.resource.data.tariffVersion is string
-        && request.resource.data.tariffVersion == get(/databases/$(database)/documents/settings/tariff).data.version
+        && (request.resource.data.tariffVersion == 'manual'
+          || request.resource.data.tariffVersion == get(/databases/$(database)/documents/settings/tariff).data.version)
         && request.resource.data.createdAt == request.time
         && request.resource.data.sector in ['parc', 'atelier']
         && (
@@ -74,13 +74,10 @@ service cloud.firestore {
             ])
             && validMixedServices(request.resource.data)
             && request.resource.data.vehicle is string
-            && request.resource.data.vehicle.size() >= 4
             && request.resource.data.vehicle.size() <= 17
-            && (request.resource.data.sector != 'parc' || (
-              request.resource.data.location is string
-              && request.resource.data.location.size() > 0
-              && request.resource.data.location.size() <= 50
-            ))
+            && (request.resource.data.sector == 'parc'
+              ? request.resource.data.parcIdentifier is string
+              : request.resource.data.vehicle.size() >= 4)
           ) ||
           (
             request.resource.data.keys().hasAll(['kind'])
@@ -93,11 +90,7 @@ service cloud.firestore {
                 && request.resource.data.vehicle is string
                 && request.resource.data.vehicle.size() >= 4
                 && request.resource.data.vehicle.size() <= 17
-                && (request.resource.data.sector != 'parc' || (
-                  request.resource.data.location is string
-                  && request.resource.data.location.size() > 0
-                  && request.resource.data.location.size() <= 50
-                )))
+                && (request.resource.data.sector != 'parc' || request.resource.data.parcIdentifier is string))
             )
           )
         );

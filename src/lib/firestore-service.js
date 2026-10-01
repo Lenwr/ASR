@@ -9,6 +9,7 @@ import {
 import { catalog, initialRates } from './catalog.js'
 import { validateOperation, canRecord, validPrice } from './domain.js'
 import { dayKey } from './stats.js'
+import { operationEdit } from './operationEdit.js'
 
 // V1 sans Cloud Functions : les écritures passent directement par Firestore.
 // Les règles Firestore restent la barrière de sécurité et doivent être
@@ -39,7 +40,7 @@ export function createFirestoreService(db, getUid) {
     if (
       !profile ||
       profile.active === false ||
-      (requireAdmin && profile.role !== 'admin')
+      (requireAdmin && !['admin','superAdmin'].includes(profile.role))
     ) {
       throw new Error(
         'Votre compte ne dispose pas des droits nécessaires.'
@@ -100,14 +101,7 @@ export function createFirestoreService(db, getUid) {
       // L'entrée conserve seulement la version tarifaire utilisée.
 
       const tariff = await transaction.get(tariffRef)
-
-      if (!tariff.exists()) {
-        throw new Error(
-          'Les tarifs doivent être initialisés par un administrateur avant la première saisie.'
-        )
-      }
-
-      const date = dayKey(new Date())
+      const date = entry.operationDate || dayKey(new Date())
 
       // -------------------------------------------------------
       // SERVICES SELECTIONNES
@@ -198,6 +192,17 @@ export function createFirestoreService(db, getUid) {
         vehicle: entry.vehicle,
 
         location: entry.location,
+        parcIdentifier: entry.parcIdentifier,
+        color: entry.color,
+        revenue: entry.revenue,
+        price: entry.price,
+        overtime: entry.overtime,
+        percent25: entry.percent25,
+        percent50: entry.percent50,
+        hours: entry.hours,
+        hours25: entry.hours25,
+        hours50: entry.hours50,
+        prorata: entry.prorata,
 
         // Toutes les activités réalisées sur CE véhicule.
         serviceIds: validatedServiceIds,
@@ -224,7 +229,7 @@ export function createFirestoreService(db, getUid) {
           profile.email ||
           operatorId,
 
-        tariffVersion: tariff.data().version,
+        tariffVersion: tariff.exists() ? tariff.data().version : 'manual',
 
         createdAt: serverTimestamp()
       }
@@ -325,6 +330,7 @@ export function createFirestoreService(db, getUid) {
       for (const serviceId of input.serviceIds || []) serviceSnapshots.push(await transaction.get(doc(db, 'services', serviceId)))
       const available = serviceSnapshots.map((item, index) => item.exists() ? { id: input.serviceIds[index], ...item.data() } : catalog.find(service => service.id === input.serviceIds[index])).filter(Boolean)
       const services = servicesForEntry(before.sector, input.serviceIds, available)
+      const changes = operationEdit({...input, sector:before.sector}, services)
       const serviceIds = services.map(service => service.id)
       const unitServiceIds = services
         .filter(service => service.kind === 'unit')
@@ -333,19 +339,7 @@ export function createFirestoreService(db, getUid) {
         .filter(service => service.kind === 'daily')
         .map(service => service.id)
 
-      const location =
-        before.sector === 'parc'
-          ? String(input.location || '').trim().toUpperCase()
-          : ''
-
-      if (
-        before.sector === 'parc' &&
-        (!location || location.length > 50)
-      ) {
-        throw new Error(
-          'L’emplacement Parc est obligatoire (50 caractères maximum).'
-        )
-      }
+      const location = ''
 
       const previousNew = new Set(before.newlyCountedDailyServiceIds || [])
       const previousAlready = new Set(before.alreadyCountedDailyServiceIds || [])
@@ -358,7 +352,7 @@ export function createFirestoreService(db, getUid) {
         const lockRef = doc(
           db,
           'dailyLocks',
-          `${before.operatorId}_${before.date}_${serviceId}`
+          `${before.operatorId}_${changes.date}_${serviceId}`
         )
         const lockSnapshot = await transaction.get(lockRef)
 
@@ -368,10 +362,10 @@ export function createFirestoreService(db, getUid) {
           snapshot: lockSnapshot
         })
 
-        if (previousNew.has(serviceId)) {
+        if (before.date === changes.date && previousNew.has(serviceId)) {
           nextNew.push(serviceId)
         } else if (
-          previousAlready.has(serviceId) ||
+          (before.date === changes.date && previousAlready.has(serviceId)) ||
           lockSnapshot.exists()
         ) {
           nextAlready.push(serviceId)
@@ -381,7 +375,7 @@ export function createFirestoreService(db, getUid) {
       }
 
       for (const serviceId of previousNew) {
-        if (dailyServiceIds.includes(serviceId)) continue
+        if (before.date === changes.date && dailyServiceIds.includes(serviceId)) continue
 
         const lockRef = doc(
           db,
@@ -403,7 +397,7 @@ export function createFirestoreService(db, getUid) {
         transaction.set(lock.ref, {
           operationId: id,
           operatorId: before.operatorId,
-          date: before.date,
+          date: changes.date,
           serviceId: lock.serviceId,
           sector: before.sector,
           createdAt: serverTimestamp()
@@ -421,6 +415,7 @@ export function createFirestoreService(db, getUid) {
 
       const after = {
         ...before,
+        ...changes,
         location,
         serviceIds,
         unitServiceIds,
@@ -433,6 +428,7 @@ export function createFirestoreService(db, getUid) {
       }
 
       transaction.update(ref, {
+        ...changes,
         location: after.location,
         serviceIds: after.serviceIds,
         unitServiceIds: after.unitServiceIds,

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { LayoutDashboard, CarFront, Wrench, Users, SlidersHorizontal, LogOut, ArrowUpRight, ScrollText } from 'lucide-vue-next'
+import { LayoutDashboard, CarFront, Wrench, Users, LogOut, ArrowUpRight, ScrollText } from 'lucide-vue-next'
 import Logo from './Logo.vue'
 import { useAuthStore } from '../stores/auth'
 import { roles } from '../lib/catalog'
@@ -12,7 +12,6 @@ const draggedMenu = ref('')
 const menuItems = computed(() => [
   reporting.value && { id: 'dashboard', to: '/admin', label: "Vue d'ensemble", icon: LayoutDashboard },
   reporting.value && { id: 'history', to: '/history', label: 'Journal', icon: ScrollText },
-  auth.profile?.role === 'admin' && { id: 'services', to: '/services', label: 'Prestations & tarifs', icon: SlidersHorizontal },
   auth.profile?.role === 'admin' && { id: 'users', to: '/users', label: 'Équipe & accès', icon: Users },
   auth.canAccess('parc') && { id: 'parc', to: '/parc', label: 'Parc', icon: CarFront },
   auth.canAccess('atelier') && { id: 'atelier', to: '/atelier', label: 'Atelier', icon: Wrench }

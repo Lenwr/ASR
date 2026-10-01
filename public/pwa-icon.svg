@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#101e34"/>
+  <path d="M112 296h288v50H112zM145 268l34-76h154l34 76" fill="none" stroke="#fff" stroke-width="28" stroke-linejoin="round"/>
+  <circle cx="170" cy="365" r="27" fill="#59c3c3"/><circle cx="342" cy="365" r="27" fill="#59c3c3"/>
+  <text x="256" y="150" text-anchor="middle" fill="#59c3c3" font-family="Arial,sans-serif" font-size="72" font-weight="700">ASR</text>
+</svg>
